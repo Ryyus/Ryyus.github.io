@@ -46,7 +46,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p work/v03 dist
-          base64 -d payload/zhanggua-release/v03-source.tar.xz.b64 > /tmp/zhanggua-v03.tar.xz
+          cat payload/zhanggua-release/v03-chunks/chunk-*.b64 | base64 -d > /tmp/zhanggua-v03.tar.xz
           tar -xJf /tmp/zhanggua-v03.tar.xz -C work/v03
           test -f work/v03/app/src/main/java/com/zhanggua/app/MainActivity.java
           test -f work/v03/app/src/main/res/raw/zhouyi.json
