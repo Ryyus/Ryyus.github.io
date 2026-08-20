@@ -1,0 +1,109 @@
+name: Publish ZhangGua v0.6 Signed Release
+
+on:
+  push:
+    branches: ["main"]
+    paths: [".zhanggua-v06-release-trigger"]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release host
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Checkout ZhangGua payload
+        uses: actions/checkout@v4
+        with:
+          ref: build/zhanggua-releases
+          path: payload
+
+      - name: Reassemble verified signed APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cat payload/zhanggua-release/v06-apk/chunk-* | base64 -d > dist/ZhangGua-v0.6-release.apk
+          test -s dist/ZhangGua-v0.6-release.apk
+          unzip -t dist/ZhangGua-v0.6-release.apk >/dev/null
+          EXPECTED=$(awk '{print $1}' payload/zhanggua-release/v06-apk/sha256.txt)
+          ACTUAL=$(sha256sum dist/ZhangGua-v0.6-release.apk | awk '{print $1}')
+          test "$EXPECTED" = "$ACTUAL"
+          echo "APK_SHA256=$ACTUAL" >> "$GITHUB_ENV"
+          cat payload/zhanggua-release/v06-apk/signature.txt
+
+      - name: Reconstruct v0.6 source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/v06
+          cat payload/zhanggua-release/v03-chunks/chunk-*.b64 | base64 -d > /tmp/v03.tar.xz
+          tar -xJf /tmp/v03.tar.xz -C work/v06
+          cd work/v06
+          patch -p1 < ../../payload/zhanggua-release/mainactivity-v04.patch
+          cp ../../payload/zhanggua-release/AudioEngine.java app/src/main/java/com/zhanggua/app/AudioEngine.java
+          python3 ../../payload/zhanggua-release/v05_transform.py
+          python3 ../../payload/zhanggua-release/v06_transform.py
+          cp ../../payload/zhanggua-release/AudioEngineV06.java app/src/main/java/com/zhanggua/app/AudioEngine.java
+          cp ../../payload/zhanggua-release/UpdateChecker.java app/src/main/java/com/zhanggua/app/UpdateChecker.java
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/build.gradle')
+          s=p.read_text().replace('versionCode 3','versionCode 6').replace("versionName '0.3.0'","versionName '0.6.0'")
+          p.write_text(s)
+          p=Path('app/src/main/AndroidManifest.xml')
+          s=p.read_text()
+          if 'android.permission.VIBRATE' not in s:
+              s=s.replace('<uses-permission android:name="android.permission.INTERNET" />','<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.VIBRATE" />')
+          p.write_text(s)
+          PY
+          cd ../..
+          (cd work/v06 && zip -qr ../../dist/ZhangGuaAndroid-v0.6-source.zip . -x '*/build/*' '.gradle/*' 'local.properties')
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view zhanggua-v0.6 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && gh release delete zhanggua-v0.6 --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create zhanggua-v0.6 \
+            dist/ZhangGua-v0.6-release.apk \
+            dist/ZhangGuaAndroid-v0.6-source.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --target main \
+            --title "掌卦 Android v0.6 · Signed Stable" \
+            --notes "v0.6：修复并强化启动稳定性；异形屏、沉浸式、音频和震动均改为失败不致命；新增启动后静默检查更新与体验设置中的手动检查更新；首次启用独立长期 release 签名。保留 v0.5 的音效/震动/摇动开关、逐爻手动投掷、流畅投币动画、全面屏适配及完整 AI 解卦。注意：v0.5 及更早版本使用 debug 签名，因此安装 v0.6 前需要先卸载旧版；从 v0.6 起后续正式版可以直接覆盖升级。APK SHA-256: $APK_SHA256"
+
+      - name: Publish update metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p zhanggua
+          cat > zhanggua/latest.json <<EOF
+          {
+            "versionCode": 6,
+            "versionName": "0.6.0",
+            "title": "掌卦 v0.6 可用",
+            "notes": "正式 release 签名；强化启动稳定性；新增自动与手动版本更新检查。",
+            "releasePage": "https://github.com/Ryyus/Ryyus.github.io/releases/tag/zhanggua-v0.6",
+            "apkUrl": "https://github.com/Ryyus/Ryyus.github.io/releases/download/zhanggua-v0.6/ZhangGua-v0.6-release.apk",
+            "sha256": "$APK_SHA256"
+          }
+          EOF
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add zhanggua/latest.json
+          git diff --cached --quiet || git commit -m 'Publish ZhangGua v0.6 update metadata'
+          git push origin main
+
+      - name: Verify release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view zhanggua-v0.6 --repo "$GITHUB_REPOSITORY" --json url,tagName,name,assets
