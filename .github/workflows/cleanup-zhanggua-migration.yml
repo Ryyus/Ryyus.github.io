@@ -1,0 +1,58 @@
+name: Cleanup migrated ZhangGua assets
+
+on:
+  push:
+    branches: ["main"]
+    paths: [".cleanup-zhanggua-trigger"]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Delete migrated ZhangGua releases and tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName' \
+            | grep '^zhanggua-v' > /tmp/zhanggua-tags.txt || true
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            echo "Deleting release/tag: $tag"
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          done < /tmp/zhanggua-tags.txt
+
+      - name: Delete migrated build branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin --delete build/zhanggua-releases || true
+
+      - name: Verify cleanup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName' | grep -q '^zhanggua-v'; then
+            echo 'ZhangGua release still remains' >&2
+            exit 1
+          fi
+          if git ls-remote --heads origin 'build/zhanggua-releases' | grep -q .; then
+            echo 'build/zhanggua-releases still exists' >&2
+            exit 1
+          fi
+          printf 'cleanup_verified\n' > zhanggua/MIGRATED_TO_RYUS_GUA
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add zhanggua/MIGRATED_TO_RYUS_GUA
+          git diff --cached --quiet || git commit -m 'Mark ZhangGua migration cleanup complete'
+          git push origin main
