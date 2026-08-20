@@ -2,8 +2,8 @@
   "versionCode": 8,
   "versionName": "0.8.0",
   "title": "掌卦 v0.8 可用",
-  "notes": "新增经典/物理双投币动画；三枚铜钱可从按钮飞出并物理落位；设置页改为紧凑分组卡片。",
+  "notes": "新增经典浮动 / 物理飞出双动画；物理模式从起卦按钮抛出三枚铜钱；设置页改为紧凑分组卡片。",
   "releasePage": "https://github.com/Ryyus/Ryyus.github.io/releases/tag/zhanggua-v0.8",
   "apkUrl": "https://github.com/Ryyus/Ryyus.github.io/releases/download/zhanggua-v0.8/ZhangGua-v0.8-release.apk",
-  "sha256": "7dcedb3fc945112053d43598943c855fa36b004c16210addd41b55f0a8ef094f"
+  "sha256": "582159cde0b2fd2c469184e99e4c1db44719547c101ddcbe9e21f31eba1e780b"
 }
