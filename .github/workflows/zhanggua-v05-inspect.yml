@@ -1,11 +1,14 @@
-name: Temporary ZhangGua v0.5 Inspector
+name: Temporary ZhangGua v0.5 Builder
 
 on:
   pull_request:
     branches: ["main"]
 
+permissions:
+  contents: write
+
 jobs:
-  inspect:
+  build-and-release:
     if: github.head_ref == 'build/zhanggua-releases'
     runs-on: ubuntu-latest
     steps:
@@ -14,27 +17,125 @@ jobs:
         with:
           ref: build/zhanggua-releases
           path: payload
-      - name: Reconstruct v0.4 source
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 35 SDK
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Reconstruct v0.4 base
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p work/v04
+          mkdir -p work/v05 dist
           cat payload/zhanggua-release/v03-chunks/chunk-*.b64 | base64 -d > /tmp/v03.tar.xz
-          tar -xJf /tmp/v03.tar.xz -C work/v04
-          cd work/v04
+          tar -xJf /tmp/v03.tar.xz -C work/v05
+          cd work/v05
           patch -p1 < ../../payload/zhanggua-release/mainactivity-v04.patch
           cp ../../payload/zhanggua-release/AudioEngine.java app/src/main/java/com/zhanggua/app/AudioEngine.java
-      - name: Inspect state machine and interactions
+
+      - name: Apply v0.5 experience and adaptive UI
         shell: bash
         run: |
-          FILE=work/v04/app/src/main/java/com/zhanggua/app/MainActivity.java
-          echo '=== anchors ==='
-          grep -nE 'onShake\(|startCasting\(|finishCasting\(|onTouchEvent\(|drawIdle\(|drawCasting\(|showAiSettings\(|settingsButton|castCount|coinPhase' "$FILE" || true
-          echo '=== source 120-260 ==='
-          sed -n '120,260p' "$FILE"
-          echo '=== source 260-460 ==='
-          sed -n '260,460p' "$FILE"
-          echo '=== source 460-720 ==='
-          sed -n '460,720p' "$FILE"
-          echo '=== source 720-980 ==='
-          sed -n '720,980p' "$FILE"
+          set -euxo pipefail
+          cd work/v05
+          python3 ../../payload/zhanggua-release/v05_transform.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/build.gradle')
+          s=p.read_text().replace('versionCode 3','versionCode 5').replace("versionName '0.3.0'","versionName '0.5.0'")
+          p.write_text(s)
+          p=Path('app/src/main/AndroidManifest.xml')
+          s=p.read_text()
+          if 'android.permission.VIBRATE' not in s:
+              s=s.replace('<uses-permission android:name="android.permission.INTERNET" />','<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.VIBRATE" />')
+          p.write_text(s)
+          PY
+          grep -q 'manualCasting' app/src/main/java/com/zhanggua/app/MainActivity.java
+          grep -q 'showExperienceSettingsDialog' app/src/main/java/com/zhanggua/app/MainActivity.java
+          grep -q 'LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES' app/src/main/java/com/zhanggua/app/MainActivity.java
+          grep -q 'postOnAnimation' app/src/main/java/com/zhanggua/app/MainActivity.java
+
+      - name: Generate ritual audio assets
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import wave, math, random, struct, os
+          random.seed(405)
+          out='work/v05/app/src/main/res/raw'; os.makedirs(out,exist_ok=True); SR=22050
+          def write(name,samples):
+              mx=max(1,max(abs(x) for x in samples)); scale=.82*32767/mx
+              vals=[max(-32767,min(32767,int(x*scale))) for x in samples]
+              with wave.open(os.path.join(out,name),'wb') as w:
+                  w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR)
+                  w.writeframes(b''.join(struct.pack('<h',v) for v in vals))
+          def env(t,d,a=.005,r=.06):
+              if t<a: return t/a
+              if t>d-r: return max(0,(d-t)/r)
+              return 1
+          def tone(freq,dur,harmonics=(1,)):
+              return [sum((1/h)*math.sin(2*math.pi*freq*h*(i/SR)) for h in harmonics)*env(i/SR,dur) for i in range(int(SR*dur))]
+          def mix(parts,dur):
+              arr=[0.0]*int(SR*dur)
+              for off,wav,g in parts:
+                  st=int(off*SR)
+                  for i,x in enumerate(wav):
+                      if st+i<len(arr): arr[st+i]+=x*g
+              return arr
+          write('boot.wav',mix([(0,tone(420,.12,(1,2,3)),.8),(.13,tone(720,.16,(1,2)),.7)],.33))
+          n=int(SR*.18); coin=[]
+          for i in range(n):
+              t=i/SR; d=math.exp(-25*t)
+              x=(math.sin(2*math.pi*1550*t)+.55*math.sin(2*math.pi*2480*t)+.3*math.sin(2*math.pi*3320*t))*d
+              x+=random.uniform(-1,1)*math.exp(-45*t)*.35; coin.append(x)
+          write('coin.wav',coin)
+          write('settle.wav',mix([(0,tone(260,.10,(1,2,4)),.7),(.03,tone(520,.08,(1,3)),.25)],.14))
+          write('complete.wav',mix([(0,tone(330,.13,(1,2)),.55),(.09,tone(495,.14,(1,2)),.5),(.18,tone(660,.18,(1,2)),.45)],.39))
+          PY
+
+      - name: Build and verify v0.5
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd work/v05
+          gradle clean assembleDebug --stacktrace
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk | tee /tmp/v05-badging.txt | head -8
+          grep -q "versionName='0.5.0'" /tmp/v05-badging.txt
+          grep -q "com.zhanggua.app" /tmp/v05-badging.txt
+          grep -q "android.permission.VIBRATE" /tmp/v05-badging.txt
+          cp app/build/outputs/apk/debug/app-debug.apk ../../dist/ZhangGua-v0.5-debug.apk
+          cd ../..
+          (cd work/v05 && zip -qr ../../dist/ZhangGuaAndroid-v0.5-source.zip . -x '*/build/*' '.gradle/*' 'local.properties')
+          unzip -t dist/ZhangGua-v0.5-debug.apk >/dev/null
+          unzip -l dist/ZhangGua-v0.5-debug.apk | grep -E 'classes.dex|resources.arsc' >/dev/null
+          sha256sum dist/ZhangGua-v0.5-debug.apk
+
+      - name: Publish v0.5 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gh release view zhanggua-v0.5 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && gh release delete zhanggua-v0.5 --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create zhanggua-v0.5 dist/ZhangGua-v0.5-debug.apk dist/ZhangGuaAndroid-v0.5-source.zip --repo "$GITHUB_REPOSITORY" --target main --title "掌卦 Android v0.5 · Adaptive Ritual" --notes "v0.5：新增音效、震动、摇动三个独立开关；新增逐爻手动投掷模式（每次点击/摇动只掷一爻，六次成卦）；投币动画改为时间驱动并跟随屏幕刷新节奏；去除强制软件绘制；加入刘海/挖孔等异形屏安全区域、Android 11+ 沉浸式系统栏与全面屏适配。保留 v0.4 的 StickS3 Ritual UI 与完整 AI 解卦功能。APK 为 GitHub Actions 实际构建并校验的 debug 签名版本。"
+
+      - name: Show release link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view zhanggua-v0.5 --repo "$GITHUB_REPOSITORY" --json url,tagName,name
