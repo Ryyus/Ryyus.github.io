@@ -1,0 +1,9 @@
+{
+  "versionCode": 6,
+  "versionName": "0.6.0",
+  "title": "掌卦 v0.6 可用",
+  "notes": "正式 release 签名；强化启动稳定性；新增自动与手动版本更新检查。",
+  "releasePage": "https://github.com/Ryyus/Ryyus.github.io/releases/tag/zhanggua-v0.6",
+  "apkUrl": "https://github.com/Ryyus/Ryyus.github.io/releases/download/zhanggua-v0.6/ZhangGua-v0.6-release.apk",
+  "sha256": "1f033e073945ea1a566e84dd76159b6d2262a1e0ef17cef9fbf4523029197d69"
+}
