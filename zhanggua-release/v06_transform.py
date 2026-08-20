@@ -133,4 +133,9 @@ manual_update = '''            Button versionUpdateButton = new Button(getContex
 s = s[:dialog] + manual_update + s[dialog:]
 
 p.write_text(s)
+
+# Keep a reconstructed source tree self-contained: generate the ritual sound assets too.
+from generate_audio import generate
+generate(Path('app/src/main/res/raw'))
+
 print('v0.6 transform applied successfully')
