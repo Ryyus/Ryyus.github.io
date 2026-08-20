@@ -1,9 +1,13 @@
 {
-  "versionCode": 11,
-  "versionName": "0.9.2",
-  "title": "掌卦 v0.9.2 可用",
-  "notes": "项目已迁移至柳之卦 · Ryu's Gua 独立仓库；v0.9.2 将 AI 思考过程与最终解读分离，默认折叠但可自行展开，并缩短解读篇幅。此地址仅保留旧版应用更新兼容。",
-  "releasePage": "https://github.com/Ryyus/Ryus-Gua/releases/tag/v0.9.2",
-  "apkUrl": "https://github.com/Ryyus/Ryus-Gua/releases/download/v0.9.2/ZhangGua-v0.9.2-release.apk",
-  "sha256": "2cfbbb0bdaf69819036a749adc1371d4b7b1d7c3d9e5826f169651ee517ee37e"
+  "versionCode": 12,
+  "versionName": "0.9.3",
+  "title": "掌卦 v0.9.3 可用",
+  "notes": "项目已迁移至柳之卦 · Ryu's Gua 独立仓库；v0.9.3 统一动画时长，改进正式起卦与 AI 设置，并为历史加入 AI 存档、秒级时间、正式起卦标记、PIN 与备注，同时新增 Android 6.0+ Legacy APK。此地址仅保留旧版应用更新兼容。",
+  "releasePage": "https://github.com/Ryyus/Ryus-Gua/releases/tag/v0.9.3",
+  "apkUrl": "https://github.com/Ryyus/Ryus-Gua/releases/download/v0.9.3/ZhangGua-v0.9.3-release.apk",
+  "legacyApkUrl": "https://github.com/Ryyus/Ryus-Gua/releases/download/v0.9.3/ZhangGua-v0.9.3-legacy.apk",
+  "minSdk": 26,
+  "legacyMinSdk": 23,
+  "sha256": "2305d48af0eb6c38e77b92dc9f34cda40e245dc6d2905797252f50c45f3f1bea",
+  "legacySha256": "d86b6ee4c4440d0d9ad6f765b01c53cfc6c3155eefbc0c9704b51ffb3957645f"
 }
