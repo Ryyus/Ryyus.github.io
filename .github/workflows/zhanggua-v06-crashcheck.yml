@@ -1,0 +1,90 @@
+name: Temporary ZhangGua v0.6 Crash Check
+
+on:
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  crashcheck:
+    if: github.head_ref == 'build/zhanggua-releases'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout payload
+        uses: actions/checkout@v4
+        with:
+          ref: build/zhanggua-releases
+          path: payload
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Reconstruct v0.5
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p work/v05
+          cat payload/zhanggua-release/v03-chunks/chunk-*.b64 | base64 -d > /tmp/v03.tar.xz
+          tar -xJf /tmp/v03.tar.xz -C work/v05
+          cd work/v05
+          patch -p1 < ../../payload/zhanggua-release/mainactivity-v04.patch
+          cp ../../payload/zhanggua-release/AudioEngine.java app/src/main/java/com/zhanggua/app/AudioEngine.java
+          python3 ../../payload/zhanggua-release/v05_transform.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/build.gradle'); s=p.read_text().replace('versionCode 3','versionCode 5').replace("versionName '0.3.0'","versionName '0.5.0'"); p.write_text(s)
+          p=Path('app/src/main/AndroidManifest.xml'); s=p.read_text();
+          if 'android.permission.VIBRATE' not in s: s=s.replace('<uses-permission android:name="android.permission.INTERNET" />','<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.VIBRATE" />')
+          p.write_text(s)
+          PY
+          mkdir -p app/src/main/res/raw
+          python3 - <<'PY'
+          import wave, math, random, struct, os
+          random.seed(405); out='app/src/main/res/raw'; SR=22050
+          def write(name,samples):
+              mx=max(1,max(abs(x) for x in samples)); scale=.82*32767/mx; vals=[max(-32767,min(32767,int(x*scale))) for x in samples]
+              with wave.open(os.path.join(out,name),'wb') as w:
+                  w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR); w.writeframes(b''.join(struct.pack('<h',v) for v in vals))
+          def env(t,d,a=.005,r=.06): return t/a if t<a else max(0,(d-t)/r) if t>d-r else 1
+          def tone(f,d,hs=(1,)): return [sum((1/h)*math.sin(2*math.pi*f*h*(i/SR)) for h in hs)*env(i/SR,d) for i in range(int(SR*d))]
+          def mix(parts,d):
+              a=[0.0]*int(SR*d)
+              for off,w,g in parts:
+                  st=int(off*SR)
+                  for i,x in enumerate(w):
+                      if st+i<len(a): a[st+i]+=x*g
+              return a
+          write('boot.wav',mix([(0,tone(420,.12,(1,2,3)),.8),(.13,tone(720,.16,(1,2)),.7)],.33))
+          n=int(SR*.18); coin=[]
+          for i in range(n):
+              t=i/SR; d=math.exp(-25*t); coin.append((math.sin(2*math.pi*1550*t)+.55*math.sin(2*math.pi*2480*t)+.3*math.sin(2*math.pi*3320*t))*d+random.uniform(-1,1)*math.exp(-45*t)*.35)
+          write('coin.wav',coin); write('settle.wav',mix([(0,tone(260,.10,(1,2,4)),.7),(.03,tone(520,.08,(1,3)),.25)],.14)); write('complete.wav',mix([(0,tone(330,.13,(1,2)),.55),(.09,tone(495,.14,(1,2)),.5),(.18,tone(660,.18,(1,2)),.45)],.39))
+          PY
+          gradle assembleDebug
+
+      - name: Launch on emulator and inspect crash
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            adb logcat -c
+            adb install -r work/v05/app/build/outputs/apk/debug/app-debug.apk
+            adb shell am force-stop com.zhanggua.app
+            adb shell monkey -p com.zhanggua.app -c android.intent.category.LAUNCHER 1
+            sleep 6
+            echo '=== PROCESS ==='
+            adb shell pidof com.zhanggua.app || true
+            echo '=== CRASH LOG ==='
+            adb logcat -d -v brief AndroidRuntime:E ActivityTaskManager:I '*:S' | tail -200
+            if ! adb shell pidof com.zhanggua.app >/dev/null; then exit 1; fi
