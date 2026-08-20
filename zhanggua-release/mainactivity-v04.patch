@@ -1,0 +1,366 @@
+--- a/app/src/main/java/com/zhanggua/app/MainActivity.java
++++ b/app/src/main/java/com/zhanggua/app/MainActivity.java
+@@ -16,6 +16,8 @@
+ import android.hardware.SensorEventListener;
+ import android.hardware.SensorManager;
+ import android.os.Bundle;
++import android.os.VibrationEffect;
++import android.os.Vibrator;
+ import android.os.Handler;
+ import android.os.Looper;
+ import android.text.InputType;
+@@ -23,6 +25,7 @@
+ import android.view.MotionEvent;
+ import android.view.View;
+ import android.view.Window;
++import android.view.WindowManager;
+ import android.widget.ArrayAdapter;
+ import android.widget.Button;
+ import android.widget.EditText;
+@@ -43,14 +46,24 @@
+     private SensorManager sensorManager;
+     private Sensor accelerometer;
+     private long lastShakeAt = 0L;
++    private AudioEngine audioEngine;
+ 
+     @Override
+     protected void onCreate(Bundle savedInstanceState) {
+         super.onCreate(savedInstanceState);
+         Window window = getWindow();
+         window.setStatusBarColor(Color.rgb(7, 9, 7));
+-        window.setNavigationBarColor(Color.rgb(7, 9, 7));
+-        guaView = new GuaView(this);
++        window.setNavigationBarColor(Color.BLACK);
++        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
++        window.getDecorView().setSystemUiVisibility(
++                View.SYSTEM_UI_FLAG_FULLSCREEN
++                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
++                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
++                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
++                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
++                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
++        audioEngine = new AudioEngine(this);
++        guaView = new GuaView(this, audioEngine);
+         setContentView(guaView);
+ 
+         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+@@ -82,6 +95,11 @@
+ 
+     @Override public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+ 
++    @Override protected void onDestroy() {
++        if (audioEngine != null) audioEngine.release();
++        super.onDestroy();
++    }
++
+     @Override public void onBackPressed() {
+         if (guaView != null && guaView.handleBack()) return;
+         super.onBackPressed();
+@@ -96,7 +114,7 @@
+         private static final int PANEL = Color.rgb(17, 20, 17);
+         private static final int GRID = Color.rgb(29, 35, 29);
+ 
+-        private enum State { IDLE, CASTING, RESULT, DETAIL, HISTORY, AI }
++        private enum State { BOOT, IDLE, CASTING, RESULT, DETAIL, HISTORY, AI }
+ 
+         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+         private final Handler handler = new Handler(Looper.getMainLooper());
+@@ -116,7 +134,7 @@
+         private final ZhouYiRepository zhouYi;
+         private final ArrayList<HistoryHit> historyHits = new ArrayList<>();
+ 
+-        private State state = State.IDLE;
++        private State state = State.BOOT;
+         private int castCount = 0;
+         private String toastLine = "";
+         private float coinPhase = 0f;
+@@ -130,16 +148,30 @@
+         private String aiText = "";
+         private String aiError = "";
+         private String aiModel = "";
++        private int bootStep = 0;
++        private float bootSweep = 0f;
++        private final AudioEngine audio;
++        private final Vibrator vibrator;
+ 
+-        GuaView(Context context) {
++        GuaView(Context context, AudioEngine audio) {
+             super(context);
++            this.audio = audio;
++            this.vibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
+             zhouYi = new ZhouYiRepository(context);
+             paint.setTypeface(mono);
+             setBackgroundColor(BG);
+             setFocusable(true);
++            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
++            handler.postDelayed(() -> { audio.boot(); pulse(18, 90); }, 180);
++            for (int i = 1; i <= 4; i++) {
++                final int step = i;
++                handler.postDelayed(() -> { bootStep = step; bootSweep = Math.min(1f, step / 4f); invalidate(); }, 240L + i * 230L);
++            }
++            handler.postDelayed(() -> { state = State.IDLE; pulse(28, 120); invalidate(); }, 1320L);
+         }
+ 
+         boolean handleBack() {
++            if (state == State.BOOT) return true;
+             if (state == State.DETAIL) { state = State.RESULT; scrollOffset = 0; invalidate(); return true; }
+             if (state == State.HISTORY) { state = State.IDLE; scrollOffset = 0; invalidate(); return true; }
+             if (state == State.AI) { state = State.RESULT; scrollOffset = 0; invalidate(); return true; }
+@@ -150,12 +182,25 @@
+         void onShake() {
+             if (state != State.IDLE) return;
+             performHapticFeedback(HapticFeedbackConstants.CONFIRM);
++            pulse(24, 130);
+             Toast.makeText(getContext(), "摇卦", Toast.LENGTH_SHORT).show();
+             startCasting();
+         }
+ 
+         private float dp(float n) { return n * getResources().getDisplayMetrics().density; }
+ 
++        private void pulse(long ms, int amplitude) {
++            if (vibrator == null || !vibrator.hasVibrator()) return;
++            vibrator.vibrate(VibrationEffect.createOneShot(ms, Math.max(1, Math.min(255, amplitude))));
++        }
++
++        private void ritualPulse() {
++            if (vibrator == null || !vibrator.hasVibrator()) return;
++            long[] timings = {0, 18, 52, 18, 70, 34};
++            int[] amps = {0, 85, 0, 115, 0, 165};
++            vibrator.vibrate(VibrationEffect.createWaveform(timings, amps, -1));
++        }
++
+         private void text(Canvas c, String s, float x, float y, float size, int color, Paint.Align align, boolean bold) {
+             paint.setStyle(Paint.Style.FILL);
+             paint.setColor(color);
+@@ -187,8 +232,9 @@
+             super.onDraw(c);
+             float w = getWidth(), h = getHeight();
+             drawGrid(c, w, h);
+-            drawHeader(c, w);
++            if (state != State.BOOT) drawHeader(c, w);
+             switch (state) {
++                case BOOT: drawBoot(c, w, h); break;
+                 case IDLE: drawIdle(c, w, h); break;
+                 case CASTING: drawCasting(c, w, h); break;
+                 case RESULT: drawResult(c, w, h); break;
+@@ -199,15 +245,45 @@
+         }
+ 
+         private void drawGrid(Canvas c, float w, float h) {
+-            paint.setColor(Color.argb(45, 50, 70, 50));
+-            paint.setStrokeWidth(dp(0.5f));
+-            for (float y = dp(72); y < h; y += dp(28)) c.drawLine(0, y, w, y, paint);
+-            for (float x = dp(14); x < w; x += dp(28)) c.drawLine(x, dp(72), x, h, paint);
++            paint.setStyle(Paint.Style.FILL);
++            paint.setColor(Color.rgb(4, 5, 4));
++            c.drawRect(0, 0, w, h, paint);
++            paint.setColor(Color.argb(26, 150, 165, 140));
++            for (float y = 0; y < h; y += dp(4)) c.drawRect(0, y, w, y + dp(.45f), paint);
++            paint.setStyle(Paint.Style.STROKE);
++            paint.setStrokeWidth(dp(.8f));
++            paint.setColor(Color.rgb(29, 33, 28));
++            RectF bezel = new RectF(dp(8), dp(8), w - dp(8), h - dp(8));
++            c.drawRoundRect(bezel, dp(11), dp(11), paint);
++            paint.setColor(Color.argb(80, 201, 168, 91));
++            c.drawLine(dp(15), dp(18), dp(38), dp(18), paint);
++            c.drawLine(w-dp(38), h-dp(18), w-dp(15), h-dp(18), paint);
++        }
++
++        private void drawBoot(Canvas c, float w, float h) {
++            float cx = w / 2f;
++            text(c, "M5://STICKS3", dp(22), dp(44), 8.5f, MUTED, Paint.Align.LEFT, true);
++            text(c, "HEX TERMINAL", w-dp(22), dp(44), 8.5f, MUTED, Paint.Align.RIGHT, false);
++            line(c, dp(22), dp(58), w-dp(22), dp(58), GRID, 1);
++            float y = h * .37f;
++            if (bootStep >= 1) text(c, "掌", cx-dp(22), y, 42, FG, Paint.Align.CENTER, true);
++            if (bootStep >= 2) text(c, "卦", cx+dp(22), y, 42, GOLD, Paint.Align.CENTER, true);
++            if (bootStep >= 3) {
++                text(c, "ZHANG / GUA", cx, y+dp(31), 10, MUTED, Paint.Align.CENTER, true);
++                text(c, "电子蓍筮终端", cx, y+dp(52), 9.5f, FG, Paint.Align.CENTER, false);
++            }
++            float barL=dp(30), barR=w-dp(30), barY=h*.70f;
++            paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(dp(1)); paint.setColor(GRID);
++            c.drawRect(barL, barY, barR, barY+dp(8), paint);
++            paint.setStyle(Paint.Style.FILL); paint.setColor(GOLD);
++            c.drawRect(barL+dp(2), barY+dp(2), barL+dp(2)+(barR-barL-dp(4))*bootSweep, barY+dp(6), paint);
++            text(c, bootStep < 4 ? "INITIALIZING..." : "READY", cx, barY+dp(28), 8, bootStep<4?MUTED:GOLD, Paint.Align.CENTER, true);
++            text(c, "v0.4 / ritual build", cx, h-dp(36), 7.5f, MUTED, Paint.Align.CENTER, false);
+         }
+ 
+         private void drawHeader(Canvas c, float w) {
+             text(c, "掌卦", dp(20), dp(41), 26, FG, Paint.Align.LEFT, true);
+-            text(c, "ZHANG · GUA / 0.3", dp(20), dp(61), 9, MUTED, Paint.Align.LEFT, false);
++            text(c, "ZHANG · GUA / 0.4", dp(20), dp(61), 9, MUTED, Paint.Align.LEFT, false);
+             text(c, "易", w - dp(22), dp(43), 25, GOLD, Paint.Align.RIGHT, true);
+             line(c, dp(20), dp(75), w - dp(20), dp(75), GOLD, 1);
+         }
+@@ -219,8 +295,9 @@
+             button(c, settingsButton, "AI 设置", GOLD, false, 9.5f);
+             button(c, historyButton, "历史", MUTED, false, 10);
+ 
+-            text(c, "默念一事", cx, h * 0.32f, 26, FG, Paint.Align.CENTER, true);
+-            text(c, "不问过去，不催将来", cx, h * 0.32f + dp(31), 12, MUTED, Paint.Align.CENTER, false);
++            text(c, "默 念 一 事", cx, h * 0.30f, 24, FG, Paint.Align.CENTER, true);
++            text(c, "ONE QUESTION / ONE CAST", cx, h * 0.30f + dp(27), 8, MUTED, Paint.Align.CENTER, true);
++            text(c, "静心 · 持念 · 起卦", cx, h * 0.30f + dp(47), 10.5f, GOLD, Paint.Align.CENTER, false);
+ 
+             RectF seal = new RectF(cx - dp(43), h * 0.47f - dp(43), cx + dp(43), h * 0.47f + dp(43));
+             paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(dp(2)); paint.setColor(RED);
+@@ -229,8 +306,8 @@
+ 
+             primaryButton.set(dp(28), h - dp(122), w - dp(28), h - dp(64));
+             button(c, primaryButton, "按下成卦", GOLD, true, 13);
+-            text(c, "或摇一摇手机", cx, h - dp(40), 10, GOLD, Paint.Align.CENTER, true);
+-            text(c, "三枚铜钱 · 六次成爻 · 本地离线", cx, h - dp(20), 8.5f, MUTED, Paint.Align.CENTER, false);
++            text(c, "KEY / SHAKE", cx, h - dp(41), 9, GOLD, Paint.Align.CENTER, true);
++            text(c, "三钱六掷 · 自下而上", cx, h - dp(21), 8.2f, MUTED, Paint.Align.CENTER, false);
+         }
+ 
+         private void drawCasting(Canvas c, float w, float h) {
+@@ -262,37 +339,53 @@
+             HexagramEngine.Hexagram base = HexagramEngine.lookup(lines, false);
+             HexagramEngine.Hexagram changed = HexagramEngine.lookup(lines, true);
+             List<String> moving = HexagramEngine.movingLineLabels(lines);
++            float cx = w / 2f;
++
++            text(c, String.format(Locale.CHINA, "%02d", base.number), dp(21), dp(111), 10, RED, Paint.Align.LEFT, true);
++            text(c, base.name, dp(48), dp(112), 18, FG, Paint.Align.LEFT, true);
++            text(c, "本卦", w-dp(22), dp(109), 8.5f, GOLD, Paint.Align.RIGHT, true);
++            line(c, dp(20), dp(123), w-dp(20), dp(123), GRID, 1);
++
++            // 主卦使用更接近小尺寸 LCD 的大号六爻排版。
++            float stackCx = cx - dp(39);
++            drawStack(c, stackCx, dp(315), lines, 6, false, dp(63), dp(33));
++            text(c, "上" + base.upper + " / 下" + base.lower, stackCx, dp(345), 9.5f, MUTED, Paint.Align.CENTER, true);
++
++            // 之卦缩在右侧，模拟掌上设备中“一屏看本卦，旁注之卦”的布局。
++            text(c, "之", w-dp(62), dp(166), 9, MUTED, Paint.Align.CENTER, true);
++            drawMiniStack(c, w-dp(62), dp(226), changedLines());
++            text(c, String.format(Locale.CHINA, "%02d", changed.number), w-dp(62), dp(280), 8, RED, Paint.Align.CENTER, true);
++            text(c, changed.name, w-dp(62), dp(299), 9.5f, FG, Paint.Align.CENTER, true);
++
++            String movingText = moving.isEmpty() ? "静卦 / NO CHANGE" : "动爻 / " + join(moving, " · ");
++            text(c, movingText, dp(22), dp(382), 9.5f, moving.isEmpty() ? MUTED : RED, Paint.Align.LEFT, true);
++            line(c, dp(20), dp(396), w-dp(20), dp(396), GRID, 1);
++
++            text(c, "KEY MAP", dp(22), dp(421), 7.5f, MUTED, Paint.Align.LEFT, true);
++            float y1 = h - dp(154), y2 = h - dp(99), y3 = h - dp(44);
++            auxLeftButton.set(dp(20), y1, w/3f-dp(4), y2-dp(7));
++            rightButton.set(w/3f+dp(4), y1, w*2f/3f-dp(4), y2-dp(7));
++            auxRightButton.set(w*2f/3f+dp(4), y1, w-dp(20), y2-dp(7));
++            leftButton.set(dp(20), y2, w/2f-dp(5), y3-dp(7));
++            settingsButton.set(w/2f+dp(5), y2, w-dp(20), y3-dp(7));
++            primaryButton.set(dp(20), y3, w-dp(20), h-dp(8));
++            button(c, auxLeftButton, "经", GOLD, false, 13);
++            button(c, rightButton, "AI", GOLD, true, 11);
++            button(c, auxRightButton, "史", MUTED, false, 13);
++            button(c, leftButton, "复制", FG, false, 10);
++            button(c, settingsButton, "AI 设置", MUTED, false, 9);
++            button(c, primaryButton, "再起一卦 / RECAST", MUTED, false, 9);
++        }
+ 
+-            float top = dp(93), gap = dp(10);
+-            float cardW = (w - dp(40) - gap) / 2f;
+-            RectF l = new RectF(dp(20), top, dp(20) + cardW, top + dp(220));
+-            RectF r = new RectF(l.right + gap, top, w - dp(20), top + dp(220));
+-            panel(c, l); panel(c, r);
+-            text(c, "本卦", l.centerX(), l.top + dp(27), 11, GOLD, Paint.Align.CENTER, true);
+-            text(c, "变卦", r.centerX(), r.top + dp(27), 11, GOLD, Paint.Align.CENTER, true);
+-            drawStack(c, l.centerX(), l.top + dp(160), lines, 6, false, dp(46), dp(23));
+-            drawStack(c, r.centerX(), r.top + dp(160), lines, 6, true, dp(46), dp(23));
+-            text(c, "第" + base.number + "卦", l.centerX(), l.bottom - dp(34), 8.5f, MUTED, Paint.Align.CENTER, false);
+-            text(c, base.name, l.centerX(), l.bottom - dp(13), 13, FG, Paint.Align.CENTER, true);
+-            text(c, "第" + changed.number + "卦", r.centerX(), r.bottom - dp(34), 8.5f, MUTED, Paint.Align.CENTER, false);
+-            text(c, changed.name, r.centerX(), r.bottom - dp(13), 13, FG, Paint.Align.CENTER, true);
+-
+-            float infoY = l.bottom + dp(27);
+-            text(c, "上 " + base.upper + "   /   下 " + base.lower, dp(23), infoY, 11, FG, Paint.Align.LEFT, false);
+-            String movingText = moving.isEmpty() ? "无动爻" : "动爻：" + join(moving, " · ");
+-            text(c, movingText, dp(23), infoY + dp(25), 10.5f, moving.isEmpty() ? MUTED : RED, Paint.Align.LEFT, true);
+-
+-            float y1 = h - dp(150), y2 = h - dp(94), y3 = h - dp(38);
+-            auxLeftButton.set(dp(20), y1, w / 2f - dp(5), y2 - dp(7));
+-            auxRightButton.set(w / 2f + dp(5), y1, w - dp(20), y2 - dp(7));
+-            leftButton.set(dp(20), y2, w / 2f - dp(5), y3 - dp(7));
+-            rightButton.set(w / 2f + dp(5), y2, w - dp(20), y3 - dp(7));
+-            primaryButton.set(dp(20), y3, w - dp(20), h - dp(8));
+-            button(c, auxLeftButton, "经文", GOLD, false, 12);
+-            button(c, auxRightButton, "历史", MUTED, false, 12);
+-            button(c, leftButton, "复制卦象", FG, false, 11);
+-            button(c, rightButton, "AI 解卦", GOLD, true, 11);
+-            button(c, primaryButton, "再起一卦", MUTED, false, 10);
++        private int[] changedLines() {
++            int[] out = new int[6];
++            for (int i = 0; i < 6; i++) {
++                int v = lines[i];
++                if (v == 6) out[i] = 7;
++                else if (v == 9) out[i] = 8;
++                else out[i] = v;
++            }
++            return out;
+         }
+ 
+         private void drawDetail(Canvas c, float w, float h) {
+@@ -527,16 +620,17 @@
+ 
+             if (e.getAction() != MotionEvent.ACTION_UP) return true;
+             if (state == State.IDLE) {
+-                if (primaryButton.contains(x, y)) { performHapticFeedback(HapticFeedbackConstants.CONFIRM); startCasting(); return true; }
++                if (primaryButton.contains(x, y)) { performHapticFeedback(HapticFeedbackConstants.CONFIRM); pulse(22, 120); startCasting(); return true; }
+                 if (settingsButton.contains(x, y)) { showAiSettingsDialog(false); return true; }
+                 if (historyButton.contains(x, y)) { state = State.HISTORY; scrollOffset = 0; invalidate(); return true; }
+             }
+             if (state == State.RESULT) {
+-                if (auxLeftButton.contains(x, y)) { state = State.DETAIL; scrollOffset = 0; invalidate(); return true; }
+-                if (auxRightButton.contains(x, y)) { state = State.HISTORY; scrollOffset = 0; invalidate(); return true; }
++                if (auxLeftButton.contains(x, y)) { pulse(10, 60); state = State.DETAIL; scrollOffset = 0; invalidate(); return true; }
++                if (auxRightButton.contains(x, y)) { pulse(10, 60); state = State.HISTORY; scrollOffset = 0; invalidate(); return true; }
+                 if (leftButton.contains(x, y)) { copyResult(); return true; }
+                 if (rightButton.contains(x, y)) { startAiOrConfigure(); return true; }
+-                if (primaryButton.contains(x, y)) { state = State.IDLE; loadedFromHistory = false; invalidate(); return true; }
++                if (settingsButton.contains(x, y)) { showAiSettingsDialog(false); return true; }
++                if (primaryButton.contains(x, y)) { pulse(15, 75); state = State.IDLE; loadedFromHistory = false; invalidate(); return true; }
+             }
+             return true;
+         }
+@@ -552,6 +646,8 @@
+                 handler.postDelayed(() -> {
+                     state = State.RESULT;
+                     HistoryStore.add(getContext(), lines);
++                    audio.complete();
++                    ritualPulse();
+                     performHapticFeedback(HapticFeedbackConstants.CONFIRM);
+                     invalidate();
+                 }, 450);
+@@ -562,6 +658,8 @@
+                 @Override public void run() {
+                     coinPhase += 0.72f;
+                     for (int i = 0; i < 3; i++) currentCoins[i] = Math.random() > 0.5 ? "字" : "背";
++                    if (frame[0] == 1 || frame[0] == 5 || frame[0] == 8) audio.coin();
++                    if (frame[0] == 5) pulse(10, 65);
+                     invalidate(); frame[0]++;
+                     if (frame[0] < 10) handler.postDelayed(this, 42); else settleLine();
+                 }
+@@ -571,11 +669,22 @@
+ 
+         private void settleLine() {
+             int value = HexagramEngine.castLine();
++            setCoinFacesForValue(value);
+             lines[castCount] = value; toastLine = HexagramEngine.lineText(value);
++            audio.settle();
++            pulse(HexagramEngine.isMoving(value) ? 30 : 17, HexagramEngine.isMoving(value) ? 155 : 95);
+             performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); castCount++; invalidate();
+             handler.postDelayed(this::castNext, 330);
+         }
+ 
++
++        private void setCoinFacesForValue(int value) {
++            // 约定“字=2、背=3”，总数 6/7/8/9 对应老阴/少阳/少阴/老阳。
++            if (value == 6) { currentCoins[0] = "字"; currentCoins[1] = "字"; currentCoins[2] = "字"; }
++            else if (value == 7) { currentCoins[0] = "背"; currentCoins[1] = "字"; currentCoins[2] = "字"; }
++            else if (value == 8) { currentCoins[0] = "背"; currentCoins[1] = "背"; currentCoins[2] = "字"; }
++            else { currentCoins[0] = "背"; currentCoins[1] = "背"; currentCoins[2] = "背"; }
++        }
+         private String resultText() {
+             HexagramEngine.Hexagram base = HexagramEngine.lookup(lines, false);
+             HexagramEngine.Hexagram changed = HexagramEngine.lookup(lines, true);
