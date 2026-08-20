@@ -4,12 +4,15 @@ on:
   push:
     branches: ["main"]
     paths: [".zhanggua-release-trigger"]
+  pull_request:
+    branches: ["main"]
 
 permissions:
   contents: write
 
 jobs:
   build-and-release:
+    if: github.event_name == 'push' || github.head_ref == 'build/zhanggua-releases'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout release payload
@@ -62,7 +65,7 @@ jobs:
           cd work/v03
           gradle clean assembleDebug --stacktrace
           test -s app/build/outputs/apk/debug/app-debug.apk
-          aapt dump badging app/build/outputs/apk/debug/app-debug.apk | head -5
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk | head -5
           cp app/build/outputs/apk/debug/app-debug.apk ../../dist/ZhangGua-v0.3-debug.apk
           cd ../..
           (cd work/v03 && zip -qr ../../dist/ZhangGuaAndroid-v0.3-source.zip . -x '*/build/*' '.gradle/*' 'local.properties')
@@ -134,7 +137,7 @@ jobs:
           cd work/v04
           gradle clean assembleDebug --stacktrace
           test -s app/build/outputs/apk/debug/app-debug.apk
-          aapt dump badging app/build/outputs/apk/debug/app-debug.apk | tee /tmp/v04-badging.txt | head -5
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk | tee /tmp/v04-badging.txt | head -5
           grep -q "versionName='0.4.0'" /tmp/v04-badging.txt
           grep -q "com.zhanggua.app" /tmp/v04-badging.txt
           cp app/build/outputs/apk/debug/app-debug.apk ../../dist/ZhangGua-v0.4-debug.apk
@@ -150,8 +153,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          gh release view zhanggua-v0.3 >/dev/null 2>&1 && gh release delete zhanggua-v0.3 --yes --cleanup-tag || true
-          gh release view zhanggua-v0.4 >/dev/null 2>&1 && gh release delete zhanggua-v0.4 --yes --cleanup-tag || true
+          gh release view zhanggua-v0.3 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && gh release delete zhanggua-v0.3 --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release view zhanggua-v0.4 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && gh release delete zhanggua-v0.4 --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
           gh release create zhanggua-v0.3 \
             dist/ZhangGua-v0.3-debug.apk \
             dist/ZhangGuaAndroid-v0.3-source.zip \
@@ -163,7 +166,7 @@ jobs:
             dist/ZhangGuaAndroid-v0.4-source.zip \
             --repo "$GITHUB_REPOSITORY" --target main \
             --title "掌卦 Android v0.4 · StickS3 Ritual UI" \
-            --notes "v0.4：视觉复刻优先。新增 StickS3 风格启动序列、全屏黑盒扫描线界面、本卦/之卦小屏排版、自制铜钱与启动音效、分层震动反馈，并保留 v0.3 的完整 AI 解卦功能。公开资料能确认 StickS3 为 135×240 小屏并带扬声器与 IMU；原固件完整 UI 素材未公开，因此本版为基于公开演示气质的重构，不包含未授权原素材。"
+            --notes "v0.4：视觉复刻优先。新增 StickS3 风格启动序列、全屏黑盒扫描线界面、本卦/之卦小屏排版、自制铜钱与启动音效、分层震动反馈，并保留 v0.3 的完整 AI 解卦功能。原固件完整 UI 素材未公开，因此本版为基于公开演示气质的重构，不包含未授权原素材。"
 
       - name: Show release links
         env:
