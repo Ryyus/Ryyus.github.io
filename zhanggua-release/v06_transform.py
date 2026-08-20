@@ -32,8 +32,7 @@ new_cutout = '''        try {
 '''
 must_replace(old_cutout, new_cutout, 'defensive cutout startup')
 
-# Use the broadly compatible immersive flags on every supported Android version.
-# Android 11+ WindowInsets APIs are useful, but several vendor ROMs are less reliable during Activity bootstrap.
+# Use broadly compatible immersive flags on every supported Android version.
 start = s.find('    private void enterImmersive(Window window) {')
 end = s.find('    @Override public void onWindowFocusChanged', start)
 if start < 0 or end < 0:
@@ -72,7 +71,7 @@ must_replace(
 ''',
 'inset listener guard')
 
-# Vibration is optional hardware: make both pulse paths fail-open.
+# Vibration / haptics are optional hardware: fail open on vendor-specific errors.
 pulse_start = s.find('        private void pulse(long ms, int amplitude) {')
 ritual_start = s.find('        private void ritualPulse() {', pulse_start)
 text_start = s.find('        private void text(Canvas c, String s, float x, float y, float size, int color, Paint.Align align, boolean bold) {', ritual_start)
@@ -96,6 +95,12 @@ new_vibration = '''        private void pulse(long ms, int amplitude) {
             } catch (Throwable ignored) {}
         }
 
+        private void haptic(int constant) {
+            if (!hapticEnabled) return;
+            try { performHapticFeedback(constant); }
+            catch (Throwable ignored) {}
+        }
+
 '''
 s = s[:pulse_start] + new_vibration + s[text_start:]
 
@@ -112,7 +117,7 @@ must_replace(
 ''',
 'automatic update check')
 
-# Add manual update check to the Experience dialog without depending on its exact checkbox layout.
+# Add manual update check to the Experience dialog.
 exp = s.find('        private void showExperienceSettingsDialog')
 if exp < 0:
     raise SystemExit('missing experience settings dialog')
