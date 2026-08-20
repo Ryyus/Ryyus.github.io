@@ -1,0 +1,1 @@
+Trigger final monitored build using exact six verified v0.3 chunks and updated base workflow.
