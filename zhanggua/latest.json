@@ -1,9 +1,9 @@
 {
-  "versionCode": 9,
-  "versionName": "0.9.0",
-  "title": "掌卦 v0.9 可用",
-  "notes": "项目已迁移至柳之卦 · Ryu's Gua 独立仓库；v0.9 修复 AI 设置保存、不同服务商独立 API Key，并加入流式解卦。此地址仅保留旧版应用更新兼容。",
-  "releasePage": "https://github.com/Ryyus/Ryus-Gua/releases/tag/v0.9.0",
-  "apkUrl": "https://github.com/Ryyus/Ryus-Gua/releases/download/v0.9.0/ZhangGua-v0.9-release.apk",
-  "sha256": "21a0b9635af8de693073d9905faca9e8b57e9bebc77efb19825cf55bf723c444"
+  "versionCode": 10,
+  "versionName": "0.9.1",
+  "title": "掌卦 v0.9.1 可用",
+  "notes": "项目已迁移至柳之卦 · Ryu's Gua 独立仓库；v0.9.1 修复设置摘要刷新，新增正式起卦、手动3秒自动补掷、垂直翻转，并更新英文品牌。此地址仅保留旧版应用更新兼容。",
+  "releasePage": "https://github.com/Ryyus/Ryus-Gua/releases/tag/v0.9.1",
+  "apkUrl": "https://github.com/Ryyus/Ryus-Gua/releases/download/v0.9.1/ZhangGua-v0.9.1-release.apk",
+  "sha256": "ec319f10ce93b64655cca16362b00159de857cdaeb9a63e75000f3d287dde88e"
 }
