@@ -1,0 +1,40 @@
+name: Temporary ZhangGua v0.5 Inspector
+
+on:
+  push:
+    branches: ["main"]
+    paths: [".zhanggua-v05-inspect-trigger"]
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout payload
+        uses: actions/checkout@v4
+        with:
+          ref: build/zhanggua-releases
+          path: payload
+      - name: Reconstruct v0.4 source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p work/v04
+          cat payload/zhanggua-release/v03-chunks/chunk-*.b64 | base64 -d > /tmp/v03.tar.xz
+          tar -xJf /tmp/v03.tar.xz -C work/v04
+          cd work/v04
+          patch -p1 < ../../payload/zhanggua-release/mainactivity-v04.patch
+          cp ../../payload/zhanggua-release/AudioEngine.java app/src/main/java/com/zhanggua/app/AudioEngine.java
+      - name: Inspect state machine and interactions
+        shell: bash
+        run: |
+          FILE=work/v04/app/src/main/java/com/zhanggua/app/MainActivity.java
+          echo '=== anchors ==='
+          grep -nE 'onShake\(|startCasting\(|finishCasting\(|onTouchEvent\(|drawIdle\(|drawCasting\(|showAiSettings\(|settingsButton|castCount|coinPhase' "$FILE" || true
+          echo '=== source 120-260 ==='
+          sed -n '120,260p' "$FILE"
+          echo '=== source 260-460 ==='
+          sed -n '260,460p' "$FILE"
+          echo '=== source 460-720 ==='
+          sed -n '460,720p' "$FILE"
+          echo '=== source 720-980 ==='
+          sed -n '720,980p' "$FILE"
